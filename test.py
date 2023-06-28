@@ -9,7 +9,7 @@ def predict(positions,frame_l,joints_n,joints_d,device,model):
     '''
     p = zoom(positions, target_l=frame_l,
                      joints_num=joints_n, joints_dim=joints_d)
-    M = get_CG(positions,joints_n,frame_l)
+    M = get_CG(p,joints_n,frame_l)
     X_0 = np.stack([M])
     X_1 = np.stack([p])
     # pdb.set_trace()
@@ -37,7 +37,8 @@ def class2str(pred):
         'Swipe X',
         'Swipe +',
         'Swipe V',
-        'Shake'
+        'Shake',
+        'None'
     ])
     return classes[pred]
 savedir = Path('experiments') / Path('1687414290')
@@ -54,8 +55,8 @@ model.load_state_dict(torch.load(str(savedir/"model.pt")))
 model.eval()
 #尝试维护100帧的列表进行手势识别
 #shape[100,22,3]
-positions =np.zeros((100,22,3),dtype='float64')
-
+positions =np.ones((2,22,3),dtype='float64')*0.5
+last_position =np.ones((1,22,3),dtype='float64')*0.5
 import cv2
 import mediapipe as mp
 import time
@@ -69,14 +70,24 @@ handLmsStyle = mpDraw.DrawingSpec(color=(0,0,255),thickness=3)
 handConStyle = mpDraw.DrawingSpec(color=(0,255,0),thickness=2)
 pTime = 0
 cTime = 0
+isPred = False#是否正在进行手势检测
+gestrue = 14#当前手势
 while True:
     ret, img = cap.read()
     if ret:
         img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
         result = hands.process(img_rgb)
         # print(result.multi_hand_landmarks)
+        # print(result.multi_hand_world_landmarks)
         imgHeight = img.shape[0]
         imgWidth = img.shape[1]
+        if result.multi_hand_world_landmarks:
+            for handLms in result.multi_hand_world_landmarks:
+                for i , lm in enumerate(handLms.landmark):
+                    if i==0:
+                        pass
+                        # print(lm)
+                        
         if result.multi_hand_landmarks:
             for handLms in result.multi_hand_landmarks:
                 mpDraw.draw_landmarks(img,handLms,mpHands.HAND_CONNECTIONS,handLmsStyle,handConStyle)
@@ -87,8 +98,11 @@ while True:
                 for i , lm in enumerate(handLms.landmark):
                     #填充position
                     position.append([
-                        lm.x,lm.y,lm.z
+                        lm.x,-lm.y,-lm.z
                     ])
+                    if i==8:
+                        pass
+                        # print(lm)
                     if(i==0 or i==5 or i==9 or i==13 or i==17):
                         lamp_x+=lm.x
                         lamp_y+=lm.y
@@ -111,19 +125,53 @@ while True:
 
                 position.append([
                     lamp_x,
-                    lamp_y,
-                    lamp_z
+                    -lamp_y,
+                    -lamp_z
                 ])
                 position = np.array([position])
+                # print(np.around(position,3))
                 #FIFO
                 #插入22个关节点
-                positions=np.concatenate([positions,position],axis=0)
-                #删除旧的关节点
-                positions=np.delete(positions,0,axis=0)
                 
+                positions=np.concatenate([positions,position],axis=0) 
+
+                #计算坐标差异度，差异过大才开始手势预测，差异过小停止手势检测
+                diff=(np.absolute(position-last_position)**2).sum()
+                last_position=position
                 #判断一下手势
-                result = predict(positions,frame_l,joint_n,joint_d,device,model)
-                cv2.putText(img,f'class:{class2str(result)}',(430,50),cv2.FONT_HERSHEY_COMPLEX,2,(255,200,55),5)
+                if(diff>=0.01):
+                    if(not isPred):
+                        isPred=True
+                elif(diff<0.01):
+                    if(isPred):
+                        isPred=False
+                        # if(np.size(positions,0)>32):
+                        #     positions
+                        positions=np.delete(positions,0,0)
+                        # print(f"positions{np.shape(positions)}")
+                        gestrue = predict(positions,frame_l,joint_n,joint_d,device,model)
+                        # print(class2str(result))
+                    else:
+                        cv2.putText(img,f'class:{class2str(gestrue)}',(430,50),cv2.FONT_HERSHEY_COMPLEX,2,(255,200,55),5)
+                        # gestrue = 14
+                    if(np.size(positions,0)>1):
+                        #删除旧的关节点
+                        positions=np.empty([1,22,3])
+
+                    #删除旧的关节点
+                    # positions=np.delete(positions,0,axis=0)
+                cv2.putText(img,f'diff:{diff}',(430,100),cv2.FONT_HERSHEY_COMPLEX,2,(255,200,55),5)
+                cv2.putText(img,f'win_len:{np.size(positions,0)}',(430,150),cv2.FONT_HERSHEY_COMPLEX,2,(255,200,55),5)
+                    
+        else :
+            isPred = False
+            # positions=np.delete(positions,0,0)
+            # gestrue = predict(positions,frame_l,joint_n,joint_d,device,model)
+            cv2.putText(img,f'class:{class2str(gestrue)}',(430,50),cv2.FONT_HERSHEY_COMPLEX,2,(255,200,55),5)
+            if(np.size(positions,0)>1):
+                        #删除旧的关节点
+                        positions=np.empty([1,22,3])
+                # print(np.size(positions,0))
         cTime = time.time()
         fps = 1/(cTime-pTime)
         pTime = cTime

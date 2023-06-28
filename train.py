@@ -104,7 +104,7 @@ def main():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
-    parser.add_argument('--dataset', type=int, required=True, metavar='N',
+    parser.add_argument('--dataset', type=int, default=1, metavar='N',
                         help='0 for JHMDB, 1 for SHREC coarse, 2 for SHREC fine, others is undefined')
     parser.add_argument('--model', action='store_true', default=False,
                         help='For Saving the current Model')
